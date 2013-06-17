@@ -5,6 +5,7 @@ var util = require('util');
 var crypto = require('crypto');
 
 module.exports = Vector;
+module.exports.mapnik = mapnik;
 
 function Task() {
     this.err = null;
@@ -166,6 +167,11 @@ Vector.prototype.drawTile = function(bz, bx, by, z, x, y, format, callback) {
                 var surface = new mapnik.Grid(256,256);
                 opts.layer = source._map.parameters.interactivity_layer;
                 opts.fields = source._map.parameters.interactivity_fields.split(',');
+            // If format is 'vector', return the raw vector tile object.
+            } else if (format === 'vector') {
+                vtile.map = source._map;
+                vtile.opts = opts;
+                return callback(null, vtile, headers);
             } else {
                 var surface = new mapnik.Image(256,256);
             }
