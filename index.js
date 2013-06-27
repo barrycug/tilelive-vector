@@ -141,11 +141,25 @@ Vector.prototype.drawTile = function(bz, bx, by, z, x, y, format, callback) {
             return callback(format === 'utf' ? new Error('Grid does not exist') : err);
 
         var headers = {};
-        headers['Content-Type'] = format.indexOf('utf') === 0
-            ? 'application/json'
-            : format.indexOf('jpeg') === 0
-            ? 'image/jpeg'
-            : 'image/png';
+        switch (format.match(/^[a-z]+/i)[0]) {
+        case 'vector':
+        case 'headers':
+            // No content type for header-only or deferred render.
+            break;
+        case 'utf':
+            headers['Content-Type'] = 'application/json';
+            break;
+        case 'jpeg':
+            headers['Content-Type'] = 'image/jpeg';
+            break;
+        case 'svg':
+            headers['Content-Type'] = 'image/svg+xml';
+            break;
+        case 'png':
+        default:
+            headers['Content-Type'] = 'image/png';
+            break;
+        }
         headers['ETag'] = JSON.stringify(crypto.createHash('md5')
             .update(source._scale + source._md5 + (head && head['ETag'] || (z+','+x+','+y)))
             .digest('hex'));
@@ -167,6 +181,8 @@ Vector.prototype.drawTile = function(bz, bx, by, z, x, y, format, callback) {
                 var surface = new mapnik.Grid(256,256);
                 opts.layer = source._map.parameters.interactivity_layer;
                 opts.fields = source._map.parameters.interactivity_fields.split(',');
+            } else if (format === 'svg') {
+                var surface = new mapnik.CairoSurface('svg',256,256);
             // If format is 'vector', return the raw vector tile object.
             } else if (format === 'vector') {
                 vtile.map = source._map;
@@ -177,14 +193,22 @@ Vector.prototype.drawTile = function(bz, bx, by, z, x, y, format, callback) {
             }
             vtile.render(source._map, surface, opts, function(err, image) {
                 if (err) return callback(err);
-                image.encode(format, {}, function(err, buffer) {
-                    if (err) return callback(err);
-
-                    buffer._loadtime = loadtime;
-                    buffer._drawtime = (+new Date) - drawtime;
-
-                    return callback(null, buffer, headers);
-                });
+                if (format == 'svg') {
+                    headers['Content-Type'] = 'image/svg+xml';
+                    return callback(null, image.getData(), headers);
+                } else if (format === 'utf') {
+                    image.encode(format, {}, function(err, buffer) {
+                        if (err) return callback(err);
+                        return callback(null, buffer, headers);
+                    });
+                } else {
+                    image.encode(format, {}, function(err, buffer) {
+                        if (err) return callback(err);
+                        buffer._loadtime = loadtime;
+                        buffer._drawtime = (+new Date) - drawtime;
+                        return callback(null, buffer, headers);
+                    });
+                }
             });
         });
     });
