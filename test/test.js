@@ -126,7 +126,7 @@ describe('init', function() {
     it('should update xml, backend', function(done) {
         new Vector({xml:xml.a}, function(err, source) {
             assert.ifError(err);
-            assert.equal('a',source._backend.uri);
+            assert.equal('a',source._backend._sources[0].uri);
             source.getInfo(function(err, info) {
                 assert.ifError(err);
                 assert.equal('test-a', info.name);
@@ -135,7 +135,7 @@ describe('init', function() {
                     source.getInfo(function(err, info) {
                         assert.ifError(err);
                         assert.equal('test-b', info.name);
-                        assert.equal('b',source._backend.uri);
+                        assert.equal('b',source._backend._sources[0].uri);
                         done();
                     });
                 });
@@ -146,7 +146,7 @@ describe('init', function() {
         new Vector({ source:'test:///a', xml: xml.c }, function(err, source) {
             assert.ifError(err);
             assert.ok(source);
-            assert.equal('a',source._backend.uri);
+            assert.equal('a',source._backend._sources[0].uri);
             done();
         });
     });
@@ -329,13 +329,13 @@ describe('cache', function() {
         });
     });
     it('lockingcache should singleton requests to backend', function(done) {
-        assert.equal(source._backend.stats['0.0.0'], 1);
-        assert.equal(source._backend.stats['1.0.0'], 1);
-        assert.equal(source._backend.stats['1.0.1'], 1);
-        assert.equal(source._backend.stats['1.1.0'], 1);
-        assert.equal(source._backend.stats['1.1.1'], 1);
-        assert.equal(source._backend.stats['2.0.0'], undefined);
-        assert.equal(source._backend.stats['2.0.1'], undefined);
+        assert.equal(source._backend._sources[0].stats['0.0.0'], 1);
+        assert.equal(source._backend._sources[0].stats['1.0.0'], 3); // 2.0.0, 2.0.1 overzooms contribute here
+        assert.equal(source._backend._sources[0].stats['1.0.1'], 1);
+        assert.equal(source._backend._sources[0].stats['1.1.0'], 1);
+        assert.equal(source._backend._sources[0].stats['1.1.1'], 1);
+        assert.equal(source._backend._sources[0].stats['2.0.0'], undefined);
+        assert.equal(source._backend._sources[0].stats['2.0.1'], undefined);
         done();
     });
     it('cached tiles should expire after maxAge', function(done) {
@@ -344,8 +344,8 @@ describe('cache', function() {
             setTimeout(function() {
                 source.getTile(1, 0, 0, function(err, buffer, headers) {
                     assert.ifError(err);
-                    assert.equal(source._backend.stats['0.0.0'], 1);
-                    assert.equal(source._backend.stats['1.0.0'], 2);
+                    assert.equal(source._backend._sources[0].stats['0.0.0'], 1);
+                    assert.equal(source._backend._sources[0].stats['1.0.0'], 4);
                     done();
                 });
             }, 1000);
