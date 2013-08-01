@@ -14,8 +14,8 @@ var xml = {
     c: fs.readFileSync(path.resolve(__dirname + '/test-c.xml'), 'utf8')
 };
 var infos = {
-    a: { minzoom:0, maxzoom:1 },
-    b: { minzoom:0, maxzoom:2, maskLevel:1 }
+    a: { minzoom:0, maxzoom:1, vector_layers:[{id:'coastline'}] },
+    b: { minzoom:0, maxzoom:2, maskLevel:1, vector_layers:[{id:'places'}] }
 };
 var tiles = {
     a: fs.readdirSync(path.resolve(__dirname + '/test-a')).reduce(function(memo, basename) {
@@ -48,7 +48,8 @@ function Testsource(uri, callback) {
     if (uri) this.data = {
         minzoom: infos[uri].minzoom,
         maxzoom: infos[uri].maxzoom,
-        maskLevel: infos[uri].maskLevel
+        maskLevel: infos[uri].maskLevel,
+        vector_layers: infos[uri].vector_layers
     };
     this.stats = {};
     return callback && callback(null, this);
@@ -154,13 +155,14 @@ describe('init', function() {
 
 describe('tiles', function() {
     var sources = {
-        a: new Vector({ backend: new Testsource('a'), xml: xml.a }),
-        b: new Vector({ backend: new Testsource('b'), xml: xml.b }),
-        c: new Vector({ backend: new Testsource('b'), xml: xml.b, scale:2 }),
-        d: new Vector({ backend: new Testsource('a'), xml: xml.a }),
-        e: new Vector({ backend: new Testsource('a'), xml: xml.a, format:'png8:c=2' }),
-        f: new Vector({ backend: new Testsource('a'), xml: xml.a.replace('png8:m=h', 'png8:c=2') }),
-        g: new Vector({ backend: new Testsource('a'), xml: xml.a.replace('"scale">1', '"scale">2') })
+        a: new Vector({ xml: xml.a }),
+        b: new Vector({ xml: xml.b }),
+        c: new Vector({ xml: xml.b, scale:2 }),
+        d: new Vector({ xml: xml.a }),
+        e: new Vector({ xml: xml.a, format:'png8:c=2' }),
+        f: new Vector({ xml: xml.a.replace('png8:m=h', 'png8:c=2') }),
+        g: new Vector({ xml: xml.a.replace('"scale">1', '"scale">2') }),
+        h: new Vector({ source:['test:///a', 'test:///b'], xml: xml.c }),
     };
     var tests = {
         // 2.0.0, 2.0.1 test overzooming.
@@ -180,7 +182,9 @@ describe('tiles', function() {
         // Checks that format in map parameters beats default code fallback.
         f: ['0.0.0'],
         // Checks that scale in map parameters beats default code fallback.
-        g: ['0.0.0']
+        g: ['0.0.0'],
+        // Compositing. See notes for a + b above.
+        h: ['0.0.0', '1.0.0', '1.0.1', '1.1.0', '1.1.1', '1.1.2', '1.1.3', '2.0.0', '2.0.1', '2.1.1', '2.1.2']
     };
     var formats = {
         json: { ctype: 'application/json' },
@@ -330,7 +334,7 @@ describe('cache', function() {
     });
     it('lockingcache should singleton requests to backend', function(done) {
         assert.equal(source._backend._sources[0].stats['0.0.0'], 1);
-        assert.equal(source._backend._sources[0].stats['1.0.0'], 3); // 2.0.0, 2.0.1 overzooms contribute here
+        assert.equal(source._backend._sources[0].stats['1.0.0'], 1);
         assert.equal(source._backend._sources[0].stats['1.0.1'], 1);
         assert.equal(source._backend._sources[0].stats['1.1.0'], 1);
         assert.equal(source._backend._sources[0].stats['1.1.1'], 1);
@@ -345,7 +349,7 @@ describe('cache', function() {
                 source.getTile(1, 0, 0, function(err, buffer, headers) {
                     assert.ifError(err);
                     assert.equal(source._backend._sources[0].stats['0.0.0'], 1);
-                    assert.equal(source._backend._sources[0].stats['1.0.0'], 4);
+                    assert.equal(source._backend._sources[0].stats['1.0.0'], 2);
                     done();
                 });
             }, 1000);
