@@ -208,7 +208,26 @@ Backend.prototype.getTile = function(z, x, y, callback) {
     });
 
     function composeHeaders(a, b) {
-        return b;
+        var h = {};
+        [a,b].forEach(function(s) {
+            for (var k in s) {
+                switch (k.toLowerCase()) {
+                case 'etag':
+                    h['ETag'] = (h['ETag'] ? h['ETag'] + '-' : '') + s[k];
+                    break;
+                case 'last-modified':
+                    h['Last-Modified'] = new Date(Math.max(
+                        new Date(h['Last-Modified']||0),
+                        new Date(s[k])
+                    )).toUTCString();
+                    break;
+                case 'content-type':
+                    h['Content-Type'] = h['Content-Type'] || s[k];
+                    break;
+                }
+            };
+        });
+        return h;
     };
 
     function done(err) {
