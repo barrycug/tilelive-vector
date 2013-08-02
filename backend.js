@@ -103,7 +103,6 @@ function Backend(opts, callback) {
             }).join('');
             xml += '</Map>\n';
             map.bufferSize = 256;
-            map.fromStringSync(xml);
             map.fromString(xml, function(err) {
                 if (err) return callback(err);
                 backend._map = map;
