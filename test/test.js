@@ -14,8 +14,8 @@ var xml = {
     c: fs.readFileSync(path.resolve(__dirname + '/test-c.xml'), 'utf8')
 };
 var infos = {
-    a: { name:'coastline', minzoom:0, maxzoom:1, vector_layers:[{id:'coastline'}] },
-    b: { name:'places', minzoom:0, maxzoom:2, maskLevel:1, vector_layers:[{id:'places'}] }
+    a: { name:'coastline', minzoom:0, maxzoom:1, vector_layers:[{id:'coastline'}], bounds:[-180,-60,180,60] },
+    b: { name:'places', minzoom:0, maxzoom:2, maskLevel:1, vector_layers:[{id:'places'}], bounds:[-175,-85.0511,175,75] }
 };
 var tiles = {
     a: fs.readdirSync(path.resolve(__dirname + '/test-a')).reduce(function(memo, basename) {
@@ -50,7 +50,8 @@ function Testsource(uri, callback) {
         minzoom: infos[uri].minzoom,
         maxzoom: infos[uri].maxzoom,
         maskLevel: infos[uri].maskLevel,
-        vector_layers: infos[uri].vector_layers
+        vector_layers: infos[uri].vector_layers,
+        bounds: infos[uri].bounds
     };
     this.stats = {};
     return callback && callback(null, this);
@@ -187,6 +188,7 @@ describe('backend', function() {
                         minzoom: 0,
                         maxzoom: 1,
                         maskLevel: undefined,
+                        bounds: [-180,-60,180,60],
                         vector_layers: [ { id: 'coastline' } ]
                     });
                     done();
@@ -210,6 +212,7 @@ describe('backend', function() {
                         name: 'coastline + places',
                         minzoom: 0,
                         maxzoom: 2,
+                        bounds: [-180,-85.0511,180,75],
                         vector_layers: [ { id: 'coastline' }, { id: 'places' } ],
                     });
                     done();
