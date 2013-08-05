@@ -26,9 +26,8 @@ function Backend(opts, callback) {
 
     // Properties derived/composed from sources.
     this._sources = [];
-    this._minzoom = 22;
-    this._maxzoom = 0;
-    this._vector_layers = [];
+    this._infos = [];
+    this._info;
 
     var backend = this;
 
@@ -37,9 +36,10 @@ function Backend(opts, callback) {
 
     if (uris && sources) return callback(new Error('Only one of uri or source should be specified'));
     if (!uris && !sources) return callback(new Error('No sources found'));
+    if (sources) this._sources = sources;
 
     var loaduris = function(queue, result, callback) {
-        if (!uris) return callback();
+        if (!queue) return callback();
         queue = queue.slice(0);
         queue.forEach(function(uri, i) { process.nextTick(function() {
             tilelive.load(uri, function(err, source) {
@@ -51,26 +51,17 @@ function Backend(opts, callback) {
         })});
     };
 
-    var loadinfo = function(queue, callback) {
+    var loadinfo = function(queue, result, callback) {
+        if (!queue) return callback();
         queue = queue.slice(0);
         queue.forEach(function(source, i) { process.nextTick(function() {
             source.getInfo(function(err, info) {
                 if (err) return callback(err);
-                source._minzoom = info.minzoom || 0;
-                source._maxzoom = info.maxzoom || 22;
-                // @TODO some sources filter out custom keys @ getInfo forcing
-                // access to info/data properties directly. Fix this.
-                source._maskLevel = ('maskLevel' in info)
-                    ? parseInt(info.maskLevel, 10)
-                    : (source.data && 'maskLevel' in source.data)
-                    ? parseInt(source.data.maskLevel, 10)
-                    : undefined;
-                source._vector_layers = info.vector_layers || [];
-                // The backend min/maxzoom represents the most extreme values
-                // of its child sources. There is no concept of maskLevel for
-                // the overall backend.
-                backend._minzoom = Math.min(backend._minzoom, source._minzoom);
-                backend._maxzoom = Math.max(backend._maxzoom, source._maxzoom);
+                result[i] = info;
+                result[i].maxzoom = result[i].maxzoom || 22;
+                result[i].minzoom = result[i].minzoom || 0;
+                result[i].maskLevel = result[i].maskLevel || (source.data && source.data.maskLevel);
+                result[i].vector_layers = result[i].vector_layers || [];
                 queue.shift();
                 if (!queue.length) return callback();
             });
@@ -79,26 +70,60 @@ function Backend(opts, callback) {
 
     loaduris(uris, backend._sources, function(err) {
         if (err) return callback(err);
-        loadinfo(backend._sources, function(err) {
+        loadinfo(backend._sources, backend._infos, function(err) {
             if (err) return callback(err);
 
             // Single source does not require compositing.
-            if (backend._sources.length === 1) return callback(null, backend);
+            if (backend._sources.length === 1) {
+                backend._info = backend._infos[0];
+                return callback(null, backend);
+            }
 
-            // Combine all vector_layers into single array.
-            backend._vector_layers = backend._sources.reduce(function(memo, source) {
-                return memo.concat(source._vector_layers);
-            }, backend._vector_layers);
+            // Combine all infos into a single info object.
+            backend._info = backend._infos.reduce(function(memo, info) {
+                return (Object.keys(info).reduce(function(memo, key) {
+                    switch (key) {
+                    case 'name':
+                        memo[key] = memo[key] ? memo[key] + ' + ' + info[key] : info[key];
+                        break;
+                    case 'bounds':
+                        memo[key] = memo[key] || [0,0,0,0];
+                        memo[key][0] = Math.min(memo[key][0], info[key][0]);
+                        memo[key][1] = Math.min(memo[key][1], info[key][1]);
+                        memo[key][2] = Math.max(memo[key][2], info[key][2]);
+                        memo[key][3] = Math.max(memo[key][3], info[key][3]);
+                        break;
+                    case 'minzoom':
+                        memo[key] = Math.min(memo[key], info[key]);
+                        break;
+                    case 'maxzoom':
+                        memo[key] = Math.max(memo[key], info[key]);
+                        break;
+                    case 'vector_layers':
+                        memo[key] = memo[key].concat(info[key]);
+                        break;
+                    // Skipped keys.
+                    case 'maskLevel':
+                    case 'description':
+                    case 'attribution':
+                        break;
+                    default:
+                        memo[key] = memo[key] || info[key];
+                        break;
+                    }
+                    return memo;
+                }, memo));
+            }, { minzoom:22, maxzoom:0, vector_layers:[] });
 
             // Compositing requires vector_layers.
-            if (!backend._vector_layers.length)
+            if (!backend._info.vector_layers.length)
                 return callback(new Error('No vector_layers found on sources'));
 
             // Initialize compositing map.
             var map = new mapnik.Map(256,256);
             var xml = '<?xml version="1.0" encoding="utf-8"?>\n';
             xml += '<Map srs="+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +wktext +no_defs +over">\n';
-            xml += backend._vector_layers.map(function(layer) {
+            xml += backend._info.vector_layers.map(function(layer) {
                 return '<Layer name="'+layer.id+'" buffer-size="256" srs="+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +wktext +no_defs +over"></Layer>\n';
             }).join('');
             xml += '</Map>\n';
@@ -109,10 +134,12 @@ function Backend(opts, callback) {
                 backend._xml = xml;
                 callback(null, backend);
             });
-
-            callback(null, backend);
         });
     });
+};
+
+Backend.prototype.getInfo = function(callback) {
+    return callback(null, this._info);
 };
 
 // Wrapper around backend.getTile that implements a "locking" cache.
@@ -122,16 +149,16 @@ Backend.prototype.getTile = function(z, x, y, callback) {
     // If scale > 1 adjusts source data zoom level inversely.
     // scale 2x => z-1, scale 4x => z-2, scale 8x => z-3, etc.
     var d = Math.round(Math.log(backend._scale)/Math.log(2));
-    d = (z - d) > backend._minzoom ? d : 0;
+    d = (z - d) > backend._info.minzoom ? d : 0;
     x = Math.floor(x / Math.pow(2, d));
     y = Math.floor(y / Math.pow(2, d));
     z = z - d;
 
     // Backend overzooming support.
-    if (z > backend._maxzoom) {
-        x = Math.floor(x / Math.pow(2, z - backend._maxzoom));
-        y = Math.floor(y / Math.pow(2, z - backend._maxzoom));
-        z = backend._maxzoom;
+    if (z > backend._info.maxzoom) {
+        x = Math.floor(x / Math.pow(2, z - backend._info.maxzoom));
+        y = Math.floor(y / Math.pow(2, z - backend._info.maxzoom));
+        z = backend._info.maxzoom;
     }
 
     var key = z + '/' + x + '/' + y;
@@ -168,19 +195,19 @@ Backend.prototype.getTile = function(z, x, y, callback) {
         var bx = x;
         var by = y;
         var size = 0;
+        var maxz = backend._infos[idx] && (backend._infos[idx].maxzoom || 22);
+        var mask = backend._infos[idx] && (backend._infos[idx].maskLevel);
 
         // Overzooming support.
-        if (z > source._maxzoom) {
-            bz = source._maxzoom;
+        if (z > maxz) {
+            bz = maxz;
             bx = Math.floor(x / Math.pow(2, z - bz));
             by = Math.floor(y / Math.pow(2, z - bz));
         }
 
         source.getTile(bz, bx, by, function sourceGet(err, body, head) {
-            if (typeof source._maskLevel === 'number' &&
-                err && err.message === 'Tile does not exist' &&
-                bz > source._maskLevel) {
-                bz = source._maskLevel;
+            if (err && err.message === 'Tile does not exist' && mask && bz > mask) {
+                bz = mask;
                 bx = Math.floor(x / Math.pow(2, z - bz));
                 by = Math.floor(y / Math.pow(2, z - bz));
                 return source.getTile(bz, bx, by, sourceGet);

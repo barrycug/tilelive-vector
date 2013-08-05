@@ -14,8 +14,8 @@ var xml = {
     c: fs.readFileSync(path.resolve(__dirname + '/test-c.xml'), 'utf8')
 };
 var infos = {
-    a: { minzoom:0, maxzoom:1, vector_layers:[{id:'coastline'}] },
-    b: { minzoom:0, maxzoom:2, maskLevel:1, vector_layers:[{id:'places'}] }
+    a: { name:'coastline', minzoom:0, maxzoom:1, vector_layers:[{id:'coastline'}] },
+    b: { name:'places', minzoom:0, maxzoom:2, maskLevel:1, vector_layers:[{id:'places'}] }
 };
 var tiles = {
     a: fs.readdirSync(path.resolve(__dirname + '/test-a')).reduce(function(memo, basename) {
@@ -46,6 +46,7 @@ function Testsource(uri, callback) {
 
     this.uri = uri;
     if (uri) this.data = {
+        name: infos[uri].name,
         minzoom: infos[uri].minzoom,
         maxzoom: infos[uri].maxzoom,
         maskLevel: infos[uri].maskLevel,
@@ -149,6 +150,71 @@ describe('init', function() {
             assert.ok(source);
             assert.equal('a',source._backend._sources[0].uri);
             done();
+        });
+    });
+});
+
+describe('backend', function() {
+    it('should error without uris/sources', function(done) {
+        new Vector.Backend({}, function(err, backend) {
+            assert.equal('No sources found', err.message);
+            done();
+        });
+    });
+    it('should error with both uris/sources', function(done) {
+        new Vector.Backend({
+            uri: 'test:///a',
+            source: new Testsource('a')
+        }, function(err, backend) {
+            assert.equal('Only one of uri or source should be specified', err.message);
+            done();
+        });
+    });
+    [ ['uri', { uri: 'test:///a' }],
+      ['source', { source: new Testsource('a') }]
+    ].forEach(function(test) {
+        var label = test[0];
+        var opts = test[1];
+        it('should load from single ' + label, function(done) {
+            new Vector.Backend(opts, function(err, backend) {
+                assert.ifError(err);
+                assert.equal(1, backend._sources.length);
+                assert.equal(1, backend._infos.length);
+                backend.getInfo(function(err, info) {
+                    assert.ifError(err);
+                    assert.deepEqual(info, {
+                        name: 'coastline',
+                        minzoom: 0,
+                        maxzoom: 1,
+                        maskLevel: undefined,
+                        vector_layers: [ { id: 'coastline' } ]
+                    });
+                    done();
+                });
+            });
+        });
+    });
+    [ ['uris', { uri: ['test:///a','test:///b'] }],
+      ['sources', { source: [new Testsource('a'),new Testsource('b')] }]
+    ].forEach(function(test) {
+        var label = test[0];
+        var opts = test[1];
+        it('should composite multiple ' + label, function(done) {
+            new Vector.Backend({ uri: ['test:///a','test:///b'] }, function(err, backend) {
+                assert.ifError(err);
+                assert.equal(2, backend._sources.length);
+                assert.equal(2, backend._infos.length);
+                backend.getInfo(function(err, info) {
+                    assert.ifError(err);
+                    assert.deepEqual(info, {
+                        name: 'coastline + places',
+                        minzoom: 0,
+                        maxzoom: 2,
+                        vector_layers: [ { id: 'coastline' }, { id: 'places' } ],
+                    });
+                    done();
+                });
+            });
         });
     });
 });
@@ -286,7 +352,7 @@ describe('tiles', function() {
             done();
         });
     });
-    it('same backend/xml => same ETags', function(done) {
+    it('same sources => same ETags', function(done) {
         tests.a.slice(0,4).forEach(function(key) {
             assert.equal(etags.a[key], etags.d[key]);
         });
@@ -295,7 +361,7 @@ describe('tiles', function() {
         assert.notEqual(etags.a['1.1.2'], etags.a['1.1.3']);
         done();
     });
-    it('diff backend => diff ETags', function(done) {
+    it('diff sources => diff ETags', function(done) {
         tests.a.slice(0,4).forEach(function(key) {
             assert.notEqual(etags.a[key], etags.b[key]);
         });
